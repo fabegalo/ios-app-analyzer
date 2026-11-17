@@ -47,12 +47,129 @@ def analyze_app(app_path):
 
 
 def browse_file_or_directory():
-    path = filedialog.askopenfilename(
-        filetypes=[("iOS App Files", "*.ipa"), ("iOS App Files", "*.app"), ("Directories", "*/")])
+    # path = filedialog.askopenfilename(
+    #     filetypes=[("iOS App Files", "*.ipa"), ("iOS App Files", "*.app"), ("Directories", "*/")])
+    #
+    # path = filedialog.askopenfile(
+    #     filetypes=[("iOS App Files", "*.ipa"), ("iOS App Files", "*.app"), ("Todos os Arquivos", "*.*")]
+    # )
+
+    # path = filedialog.askopenfilename(
+    #     filetypes=[
+    #         ("iOS App Files", "*.ipa"),
+    #         ("iOS App Files", "*.app"),
+    #         ("Xcode Archives", "*.xcarchive"),
+    #         ("Todos os Arquivos", "*.*")
+    #     ]
+    # )
+
+    path = filedialog.askopenfilename()
+
     if path:
         entry_path.delete(0, tk.END)
         entry_path.insert(0, path)
 
+def categorize_file(file_name):
+    app_path = entry_path.get()
+
+    if app_path.endswith('.app'):
+        app_name = os.path.basename(app_path).replace('.app', '')
+        if file_name == app_name:
+            return "Code / DEX"
+
+    elif app_path.endswith('.ipa'):
+        parts = file_name.split('/')
+        if len(parts) == 3 and parts[0] == 'Payload' and parts[1].endswith('.app'):
+            app_name = parts[1][:-4]
+            if parts[2] == app_name:
+                return "Code / DEX"
+
+    elif app_path.endswith('.xcarchive'):
+        applications_path = os.path.join(app_path, 'Products', 'Applications')
+        if os.path.exists(applications_path):
+            app_files = os.listdir(applications_path)
+            if app_files:
+                app_name = app_files[0]
+                if file_name == f'Products/Applications/{app_name}/{app_name.replace(".app", "")}':
+                    return "Code / DEX"
+
+    # Função para categorizar os arquivos
+    if file_name.endswith(('.swift', '.m', '.h', '.cpp', '.cc', '.c', '.mm')):
+        return "Code / DEX"
+    elif file_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.tiff', '.bmp', '.webp', '.ico', '.heif', '.car', '.riv', '.mp3', '.json', '.xml')):
+        return "Assets"
+    elif file_name.endswith(('.xcprivacy', '.xib', '.storyboard', '.lproj', '.lproj/', '.nib', '.strings', '.plist', '.ttf', '.js', '.html', '.aiff', 'CodeResources', 'CodeRequirements-1', 'CodeDirectory', 'CodeRequirements', 'CodeSignature')):
+        return "Resources"
+    elif file_name.endswith(('.dylib', '.framework', '.a', '.h', '.tbd', '.bundle', '.bundle/')):
+        return "Native Libraries"
+    elif 'Frameworks/' in file_name and '.framework/' in file_name:
+        return "Native Libraries"
+    else:
+        print(file_name)
+        return "Other"
+
+def categorize_files(file_sizes):
+    categories = {
+        "Code / DEX": 0,
+        "Resources": 0,
+        "Assets": 0,
+        "Native Libraries": 0,
+        "Other": 0,
+    }
+
+    for file, size in file_sizes:
+        category = categorize_file(file)
+        categories[category] += size
+
+    return categories
+
+def draw_vertical_bars(canvas, categories):
+
+    canvas.delete("all")
+
+    total_size = sum(categories.values())
+    max_height = 300  # Altura máxima da barra (máxima altura da tela para as barras)
+    bar_width = 50  # Largura de cada barra
+    spacing = 50  # Espaço entre as barras
+    colors = {
+        "Code / DEX": "blue",
+        "Resources": "green",
+        "Assets": "red",
+        "Native Libraries": "purple",
+        "Other": "orange",
+    }
+
+    # Ordena as categorias pelo tamanho de forma decrescente (do maior para o menor)
+    sorted_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)
+
+    x_start = 100  # Posição inicial para a barra
+    y_start = 350  # Posição inicial para o eixo das barras
+
+    for i, (category, size) in enumerate(sorted_categories):
+        # Proporção da categoria em relação ao tamanho total
+        proportion = size / total_size if total_size else 0
+        bar_height = proportion * max_height  # A altura da barra proporcional ao tamanho
+
+        # Desenha a barra vertical
+        canvas.create_rectangle(
+            x_start + i * (bar_width + spacing), y_start - bar_height,
+            x_start + (i + 1) * bar_width + i * spacing, y_start,
+            fill=colors[category], outline="black"
+        )
+
+        # Desenha o texto indicando o tamanho de cada categoria, com texto branco
+        canvas.create_text(
+            x_start + i * (bar_width + spacing) + bar_width / 2, y_start - bar_height - 10,
+            text=f"{size / (1024 * 1024):.2f} MB",  # Converte para MB
+            anchor="center", fill="white"
+        )
+
+        # Desenha o nome da categoria na base da barra, com texto branco
+        canvas.create_text(
+            x_start + i * (bar_width + spacing) + bar_width / 2, y_start + 10,
+            text=category,
+            anchor="center", fill="white"
+        )
 
 def start_analysis():
     app_path = entry_path.get()
@@ -63,6 +180,8 @@ def start_analysis():
     file_sizes, total_size = analyze_app(app_path)
     if file_sizes is None:
         return
+
+    categories = categorize_files(file_sizes)
 
     for item in tree.get_children():
         tree.delete(item)
@@ -79,6 +198,9 @@ def start_analysis():
     text_report.delete(1.0, tk.END)
     text_report.insert(tk.END, report)
     text_report.config(state=tk.DISABLED)
+
+    # Draw the bar chart
+    draw_vertical_bars(canvas, categories)
 
 
 def extract_executable_from_ipa(ipa_path, executable_name):
@@ -226,5 +348,9 @@ label_total_size.pack(pady=5)
 
 text_report = tk.Text(root, height=10, state=tk.DISABLED)
 text_report.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+# Canvas para desenhar as barras verticais
+canvas = tk.Canvas(root, width=600, height=400)
+canvas.pack(padx=10, pady=10)
 
 root.mainloop()
